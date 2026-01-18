@@ -389,6 +389,9 @@ class LoginFrame(ttk.Frame):
         def connect_thread():
             auth_result = None
             error_message = None
+            # Create local references to credentials for cleanup
+            local_password = password
+            local_token = token
             
             try:
                 sf_auth = SalesforceAuth()
@@ -397,7 +400,7 @@ class LoginFrame(ttk.Frame):
                 if self._cancel_event.is_set():
                     return
                 
-                sf_auth.connect(username, password, token, domain, custom_domain)
+                sf_auth.connect(username, local_password, local_token, domain, custom_domain)
                 
                 # Check for cancellation after connecting
                 if self._cancel_event.is_set():
@@ -411,8 +414,11 @@ class LoginFrame(ttk.Frame):
                     error_message = str(e)
             finally:
                 # CRITICAL: Clear credentials from memory (Issue #21 Fix)
-                del password, token
-                gc.collect()
+                try:
+                    del local_password, local_token
+                    gc.collect()
+                except:
+                    pass
             
             # Schedule UI update in main thread (Issue #1 Fix - explicit capture)
             if self._cancel_event.is_set():
@@ -424,6 +430,13 @@ class LoginFrame(ttk.Frame):
         
         self._connection_thread = threading.Thread(target=connect_thread, daemon=True)
         self._connection_thread.start()
+        
+        # Clear credentials from main thread memory (Issue #21 Fix)
+        try:
+            del password, token
+            gc.collect()
+        except:
+            pass
     
     def cancel_connection(self):
         """Cancel ongoing connection (Issue #4 Fix)"""
