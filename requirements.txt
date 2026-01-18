@@ -1,0 +1,4 @@
+simple-salesforce==1.12.4
+
+#windows user only need to install pywin32
+#pip install pywin32
