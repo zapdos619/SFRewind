@@ -24,7 +24,7 @@ class BackupManager:
         self.backup_log = []
         self._metadata_cache = {}  # Issue #20 Fix: Cache for object metadata
     
-    def create_backup(self, objects_config, backup_name=None, backup_location=None):
+    def create_backup(self, objects_config, backup_name=None, backup_location=None, progress_callback=None):
         """
         Create a backup of selected objects
         
@@ -32,6 +32,7 @@ class BackupManager:
             objects_config: Dict of {object_name: [field_list]}
             backup_name: Optional custom name for backup (timestamp will be auto-added if not present)
             backup_location: Custom backup location path
+            progress_callback: Optional callback function(obj_name, current, total) for progress updates
         
         Returns:
             str: Path to backup directory
@@ -73,6 +74,9 @@ class BackupManager:
         
         # Export each object
         total_records = 0
+        total_objects = len(objects_config)
+        completed = 0
+        
         for obj_name, fields in objects_config.items():
             try:
                 self.backup_log.append(f"Processing {obj_name}...")
@@ -81,6 +85,7 @@ class BackupManager:
                 # Issue #6 Fix: _export_object now returns count, not records
                 record_count = self._export_object(obj_name, fields)
                 total_records += record_count
+                completed += 1
                 
                 metadata['objects'][obj_name] = {
                     'fields': fields,
@@ -91,6 +96,11 @@ class BackupManager:
                 self.backup_log.append(f"  ✓ Exported {record_count} records from {obj_name}")
                 self.backup_log.append(f"  Fields: {len(fields)}")
                 logger.info(f"✓ Exported {record_count} records from {obj_name}")
+                
+                # Call progress callback after each object (Issue #14 Fix)
+                if progress_callback:
+                    progress_callback(obj_name, completed, total_objects)
+                
             except Exception as e:
                 error_msg = f"  ✗ Failed to export {obj_name}: {str(e)}"
                 self.backup_log.append(error_msg)

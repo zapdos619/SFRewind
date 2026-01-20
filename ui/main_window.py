@@ -1,12 +1,17 @@
 """
-Main UI Window - Updated with Theme Support
+Main UI Window - PRODUCTION READY
+Theme Support + Window Centering Fix
+Issue #15 Fixed: Proper window centering on multi-monitor setups
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
+import logging
 from ui.login_frame import LoginFrame
 from ui.backup_frame import BackupFrame
 from ui.restore_frame import RestoreFrame
 from config.settings import APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT
+
+logger = logging.getLogger(__name__)
 
 class SalesforceBackupUI:
     """Main application window"""
@@ -21,14 +26,8 @@ class SalesforceBackupUI:
         # Set minimum window size
         self.root.minsize(900, 650)
         
-        # Calculate center position BEFORE setting geometry
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width - WINDOW_WIDTH) // 2
-        y = (screen_height - WINDOW_HEIGHT) // 2
-        
-        # Set geometry with centered position
-        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+        # Issue #15 Fix: Set window size first, center later
+        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         # Salesforce connection
         self.sf_auth = None
@@ -36,8 +35,31 @@ class SalesforceBackupUI:
         # Setup UI
         self.setup_ui()
         
+        # Issue #15 Fix: Center window after UI is ready
+        self.center_window()
+        
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def center_window(self):
+        """Center window on screen (Issue #15 Fix)"""
+        # Update window to get actual size
+        self.root.update_idletasks()
+        
+        # Get screen dimensions
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Get window dimensions
+        window_width = self.root.winfo_reqwidth()
+        window_height = self.root.winfo_reqheight()
+        
+        # Calculate center position
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # Set position
+        self.root.geometry(f"+{x}+{y}")
     
     def setup_ui(self):
         """Setup main UI components"""
@@ -47,15 +69,15 @@ class SalesforceBackupUI:
         
         # Login Tab
         self.login_frame = LoginFrame(self.notebook, self.on_login_success, self.theme_manager)
-        self.notebook.add(self.login_frame, text="🔐 Login")
+        self.notebook.add(self.login_frame, text="ðŸ” Login")
         
         # Backup Tab
         self.backup_frame = BackupFrame(self.notebook, self.get_sf_connection, self.handle_logout, self.theme_manager)
-        self.notebook.add(self.backup_frame, text="💾 Backup", state='disabled')
+        self.notebook.add(self.backup_frame, text="ðŸ’¾ Backup", state='disabled')
         
         # Restore Tab
         self.restore_frame = RestoreFrame(self.notebook, self.get_sf_connection, self.handle_logout, self.theme_manager)
-        self.notebook.add(self.restore_frame, text="♻️ Restore", state='disabled')
+        self.notebook.add(self.restore_frame, text="â™»ï¸ Restore", state='disabled')
         
         # Status Bar
         self.status_bar = ttk.Label(
@@ -89,7 +111,7 @@ class SalesforceBackupUI:
         api_version = org_info.get('api_version', 'Unknown')
         
         self.status_bar.config(
-            text=f"✓ Connected to {env_type} | {org_info['username']} | Org: {org_info['org_id']} | API: v{api_version}"
+            text=f"âœ“ Connected to {env_type} | {org_info['username']} | Org: {org_info['org_id']} | API: v{api_version}"
         )
         
         # Switch to backup tab

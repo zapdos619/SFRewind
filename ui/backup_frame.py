@@ -5,6 +5,9 @@ ALL CRITICAL ISSUES FIXED:
 - Issue #2: Shared state locks for selected_objects and all_objects
 - Issue #3: All widget updates via self.after()
 - Issue #1: Proper lambda value captures
+MEDIUM PRIORITY ISSUES FIXED:
+- Issue #16: Duplicate selection prevention
+- Issue #14: Determinate progress bars (shows real progress)
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -28,6 +31,7 @@ class BackupFrame(ttk.Frame):
         self._objects_lock = threading.Lock()
         self.selected_objects = {}
         self.all_objects = []
+        self._adding_objects = set()  # Issue #16 Fix: Track objects being added
         
         self.backup_location = None
         
@@ -78,15 +82,17 @@ class BackupFrame(ttk.Frame):
         search_input_frame.pack(fill='x', pady=5)
         
         ttk.Label(search_input_frame, text="Search:").pack(side='left', padx=5)
-        self.search_entry = ttk.Entry(search_input_frame, width=25)
-        self.search_entry.pack(side='left', padx=5)
+        # Enlarged input field for better visual balance
+        self.search_entry = ttk.Entry(search_input_frame, width=35)
+        self.search_entry.pack(side='left', padx=5, fill='x', expand=True)
         self.search_entry.bind('<Return>', lambda e: self.search_objects())
         
-        self.search_btn = ttk.Button(search_input_frame, text="Search", command=self.search_objects)
-        self.search_btn.pack(side='left', padx=2)
+        # Larger buttons for consistent spacing
+        self.search_btn = ttk.Button(search_input_frame, text="Search", command=self.search_objects, width=12)
+        self.search_btn.pack(side='left', padx=3)
         
-        self.load_all_btn = ttk.Button(search_input_frame, text="Load All Objects", command=self.load_all_objects)
-        self.load_all_btn.pack(side='left', padx=2)
+        self.load_all_btn = ttk.Button(search_input_frame, text="Load All Objects", command=self.load_all_objects, width=16)
+        self.load_all_btn.pack(side='left', padx=3)
         
         # Available objects display
         available_frame = ttk.Frame(search_frame)
@@ -153,7 +159,12 @@ class BackupFrame(ttk.Frame):
         self.progress_var = tk.StringVar(value="Ready to backup")
         ttk.Label(right_panel, textvariable=self.progress_var).pack(pady=10)
         
-        self.progress_bar = ttk.Progressbar(right_panel, mode='indeterminate')
+        # Issue #14 Fix: Use determinate mode for real progress
+        self.progress_bar = ttk.Progressbar(
+            right_panel, 
+            mode='determinate',
+            maximum=100
+        )
         self.progress_bar.pack(fill='x', pady=10)
         
         # Buttons frame
@@ -265,7 +276,7 @@ class BackupFrame(ttk.Frame):
                 self.available_objects_frame,
                 text=obj,
                 command=lambda o=obj: self.add_object_to_list(o),
-                width=15
+                width=25  # Fixed: Increased from 15 to 25
             )
             btn.grid(row=row, column=col, padx=2, pady=2, sticky='ew')
             col += 1
@@ -387,7 +398,7 @@ class BackupFrame(ttk.Frame):
                 self.available_objects_frame,
                 text=obj,
                 command=lambda o=obj: self.add_object_to_list(o),
-                width=15
+                width=25  # Fixed: Increased from 15 to 25
             )
             btn.grid(row=row, column=col, padx=2, pady=2, sticky='ew')
             col += 1
@@ -396,15 +407,25 @@ class BackupFrame(ttk.Frame):
                 row += 1
     
     def add_object_to_list(self, obj_name):
-        """Add object with cancellation support (Issue #4 Fix)"""
+        """Add object with cancellation support (Issue #4 Fix) and duplicate prevention (Issue #16 Fix)"""
         # Thread-safe check (Issue #2 Fix)
         with self._objects_lock:
             if obj_name in self.selected_objects:
                 messagebox.showinfo("Already Added", f"{obj_name} is already in the selected list")
                 return
+            
+            # Issue #16 Fix: Check if currently being added
+            if obj_name in self._adding_objects:
+                messagebox.showinfo("Please Wait", 
+                    f"{obj_name} is currently being added. Please wait...")
+                return
+            
+            # Mark as being added
+            self._adding_objects.add(obj_name)
         
         with self._operation_lock:
             if self._is_loading or self._is_backing_up:
+                self._adding_objects.discard(obj_name)  # Issue #16 Fix
                 messagebox.showwarning("Operation in Progress", "Please wait for current operation to complete")
                 return
             self._is_loading = True
@@ -412,6 +433,7 @@ class BackupFrame(ttk.Frame):
         sf = self.get_connection()
         if not sf:
             self._is_loading = False
+            self._adding_objects.discard(obj_name)  # Issue #16 Fix
             return
         
         self._cancel_event.clear()
@@ -441,6 +463,8 @@ class BackupFrame(ttk.Frame):
             finally:
                 with self._operation_lock:
                     self._is_loading = False
+                # Issue #16 Fix: Always remove from adding set
+                self._adding_objects.discard(obj_name)
             
             # Update in main thread (Issue #1 Fix - explicit capture)
             if self._cancel_event.is_set():
@@ -516,16 +540,30 @@ class BackupFrame(ttk.Frame):
         # Clear cancel event
         self._cancel_event.clear()
         
+        # Issue #14 Fix: Calculate total progress
+        total_objects = len(objects_copy)
+        
         # Update UI (Issue #3 Fix)
         self.after(0, lambda: self.backup_btn.config(state='disabled'))
         self.after(0, lambda: self.cancel_btn.config(state='normal'))
-        self.after(0, lambda: self.progress_bar.start())
-        self.after(0, lambda: self.progress_var.set("Backing up..."))
+        # Issue #14 Fix: Set determinate progress instead of spinning
+        self.after(0, lambda t=total_objects: self.progress_bar.config(maximum=t, value=0))
+        self.after(0, lambda t=total_objects: self.progress_var.set(f"Backing up 0/{t} objects..."))
         self.after(0, lambda: self.results_text.delete(1.0, tk.END))
         
         def backup_thread():
             final_path = None
             error = None
+            
+            # Define progress callback function (Issue #14 Fix - Progressive Updates)
+            def update_progress(obj_name, completed, total):
+                """Update progress bar after each object is backed up"""
+                # OPTIMIZED: Single self.after call instead of two (prevents UI freeze)
+                def _update():
+                    self.progress_bar.config(value=completed)
+                    self.progress_var.set(f"Backed up {obj_name} ({completed}/{total} objects)")
+                
+                self.after(0, _update)
             
             try:
                 if self._cancel_event.is_set():
@@ -538,7 +576,17 @@ class BackupFrame(ttk.Frame):
                 if self._cancel_event.is_set():
                     return
                 
-                final_path = backup_mgr.create_backup(objects_config, backup_name, str(self.backup_location))
+                # Issue #14 Fix: Pass progress callback to get real-time updates
+                final_path = backup_mgr.create_backup(
+                    objects_config, 
+                    backup_name, 
+                    str(self.backup_location),
+                    progress_callback=update_progress
+                )
+                
+                # Issue #14 Fix: Update to 100% on completion
+                self.after(0, lambda t=total_objects: self.progress_bar.config(value=t))
+                self.after(0, lambda t=total_objects: self.progress_var.set(f"Completed {t}/{t} objects"))
                 
             except Exception as e:
                 if not self._cancel_event.is_set():
@@ -561,7 +609,8 @@ class BackupFrame(ttk.Frame):
     
     def _on_backup_cancelled(self):
         """Handle cancelled backup - RUNS IN MAIN THREAD (Issue #3 Fix)"""
-        self.progress_bar.stop()
+        # Issue #14 Fix: No need to stop() in determinate mode, just reset value
+        self.progress_bar.config(value=0)
         self.backup_btn.config(state='normal')
         self.cancel_btn.config(state='disabled')
         self.progress_var.set("Backup cancelled")
@@ -570,7 +619,7 @@ class BackupFrame(ttk.Frame):
     def on_backup_complete(self, backup_path, selected_objects_snapshot):
         """Handle successful backup - RUNS IN MAIN THREAD (Issue #3 Fix)"""
         try:
-            self.progress_bar.stop()
+            # Issue #14 Fix: No need to stop() in determinate mode
             self.backup_btn.config(state='normal')
             self.cancel_btn.config(state='disabled')
             self.progress_var.set("Backup completed!")
@@ -595,7 +644,8 @@ class BackupFrame(ttk.Frame):
     def on_backup_error(self, error_msg):
         """Handle backup error - RUNS IN MAIN THREAD (Issue #3 Fix)"""
         try:
-            self.progress_bar.stop()
+            # Issue #14 Fix: No need to stop() in determinate mode, reset to 0
+            self.progress_bar.config(value=0)
             self.backup_btn.config(state='normal')
             self.cancel_btn.config(state='disabled')
             self.progress_var.set("Backup failed")
